@@ -90,76 +90,48 @@ def load_patient(key):
             return None, None
     return PATIENTS_DATA[key]['info'], PATIENTS_DATA[key]['data']
 
-# Charger les données
-csv_path = os.path.join(os.path.dirname(__file__), "walking_data_analysis_caen.csv")
-if os.path.exists(csv_path):
-    df = pd.read_csv(csv_path)
-    df['DateTime'] = pd.to_datetime(df['DateTime'])
-else:
-    df = None  # Ou gérez le cas où il n'y a pas de CSV par défaut
+def compute_segments(df):
+    segments = []
+    for file_name in df['FileName'].unique():
+        file_data = df[df['FileName'] == file_name].sort_values('DateTime')
+        time_diff = file_data['HourOfDay'].diff()
+        new_segment = (time_diff > 0.0083).astype(int).cumsum()
+        for segment in new_segment.unique():
+            segment_data = file_data[new_segment == segment]
+            if len(segment_data) > 0:
+                start_time = segment_data['HourOfDay'].iloc[0]
+                end_time = segment_data['HourOfDay'].iloc[-1]
+                duration = (end_time - start_time) * 60
+                segments.append({
+                    "file_name": file_name,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "duration": duration,
+                    "segment_data": segment_data
+                })
+    return segments
+
+def compute_daily_stats(df):
+    daily_stats = {}
+    for file_name in df['FileName'].unique():
+        file_data = df[df['FileName'] == file_name]
+        nb_steps = len(file_data) * 2
+        total_distance = file_data['Length'].sum()
+        walking_time = file_data['WalkingMinutes'].iloc[0]
+        try:
+            date_str = ''.join(filter(str.isdigit, file_name))[:8]
+            formatted_date = f"{date_str[6:8]}/{date_str[4:6]}/{date_str[0:4]}"
+        except:
+            formatted_date = file_name
+        daily_stats[formatted_date] = {
+            'steps': nb_steps,
+            'distance': total_distance,
+            'time': walking_time
+        }
+    return daily_stats
 
 # --- Infos patient (exemple, à adapter selon ton CSV) ---
 patient_info = {}
-
-# --- Indicateurs de performance ---
-perf_data = df.agg({'Speed': 'mean', 'Length': 'mean', 'Height': 'mean'})
-nb_jours = df['FileName'].nunique()
-nb_pas_total = len(df)
-nb_pas_moyen = nb_pas_total / nb_jours
-distance_totale = len(df) * perf_data['Length']
-distance_moyenne = distance_totale / nb_jours
-
-metrics = [
-    ("Vitesse de pas (m/s)", perf_data['Speed']),
-    ("Longueur de pas (m)", perf_data['Length']),
-    ("Hauteur de pas (m)", perf_data['Height']),
-    ("Nombre de pas", nb_pas_moyen),
-    ("Distance parcourue (m)", distance_moyenne)
-]
-
-# --- Préparation des segments pour le graphique de densité ---
-segments = []
-for file_name in df['FileName'].unique():
-    file_data = df[df['FileName'] == file_name].sort_values('DateTime')
-    y_pos = file_name
-    time_diff = file_data['HourOfDay'].diff()
-    new_segment = (time_diff > 0.0083).astype(int).cumsum()
-    for segment in new_segment.unique():
-        segment_data = file_data[new_segment == segment]
-        if len(segment_data) > 0:
-            start_time = segment_data['HourOfDay'].iloc[0]
-            end_time = segment_data['HourOfDay'].iloc[-1]
-            duration = (end_time - start_time) * 60
-            segments.append({
-                "file_name": file_name,
-                "start_time": start_time,
-                "end_time": end_time,
-                "duration": duration,
-                "segment_data": segment_data
-            })
-
-# --- Statistiques quotidiennes ---
-daily_stats = {}
-for file_name in df['FileName'].unique():
-    file_data = df[df['FileName'] == file_name]
-    # Nombre de pas (nombre total de mesures multiplié par 2)
-    nb_steps = len(file_data) * 2
-    # Distance totale (somme des longueurs)
-    total_distance = file_data['Length'].sum()
-    # Temps de marche (en minutes)
-    walking_time = file_data['WalkingMinutes'].iloc[0]
-    # Formater la date pour l'affichage
-    try:
-        date_str = ''.join(filter(str.isdigit, file_name))[:8]
-        formatted_date = f"{date_str[6:8]}/{date_str[4:6]}/{date_str[0:4]}"
-    except:
-        formatted_date = file_name
-    daily_stats[formatted_date] = {
-        'steps': nb_steps,
-        'distance': total_distance,
-        'time': walking_time
-    }
-dates = sorted(daily_stats.keys())
 
 # --- Dash app ---
 app = dash.Dash(__name__)
@@ -294,8 +266,7 @@ def make_gauge_bar(value, title, vmin, vmax, steps, total=None):
     fig.update_yaxes(visible=False)
     return fig
 
-def make_density_figure(df):
-    # Mapping FileName -> date formatée
+def make_density_figure(df, segments):
     file_name_to_date = {}
     for file_name in df['FileName'].unique():
         try:
@@ -304,7 +275,6 @@ def make_density_figure(df):
         except:
             formatted_date = file_name
         file_name_to_date[file_name] = formatted_date
-
     y_labels = [file_name_to_date[f] for f in sorted(df['FileName'].unique())]
     traces = []
     for i, file_name in enumerate(sorted(df['FileName'].unique())):
@@ -313,19 +283,17 @@ def make_density_figure(df):
         for seg in segs:
             color = f"hsl({i*40%360},70%,50%)"
             if seg["duration"] >= 2:
-                # Segment cliquable
                 traces.append(go.Scatter(
-                x=[seg["start_time"], seg["end_time"]],
+                    x=[seg["start_time"], seg["end_time"]],
                     y=[y_val, y_val],
-                mode="lines",
-                line=dict(width=15, color=color, shape="linear"),
-                hoverinfo="text",
+                    mode="lines",
+                    line=dict(width=15, color=color, shape="linear"),
+                    hoverinfo="text",
                     text=f"{y_val}<br>Début: {seg['start_time']:.2f}h<br>Fin: {seg['end_time']:.2f}h<br>Durée: {seg['duration']:.1f} min",
-                customdata=[f"{file_name}|{seg['start_time']}|{seg['end_time']}"]*2,
-                showlegend=False
-            ))
+                    customdata=[f"{file_name}|{seg['start_time']}|{seg['end_time']}"]*2,
+                    showlegend=False
+                ))
             else:
-                # Segment non cliquable (pas de customdata)
                 traces.append(go.Scatter(
                     x=[seg["start_time"], seg["end_time"]],
                     y=[y_val, y_val],
@@ -390,15 +358,14 @@ def make_detail_figure(segment_data):
     fig.update_layout(height=600, showlegend=False, margin=dict(t=40, b=40), plot_bgcolor="white", paper_bgcolor="white", font=dict(family="Roboto, Arial, sans-serif", size=15))
     return fig
 
-def make_daily_bar_figure(df):
+def make_daily_bar_figure(df, daily_stats):
     colors = {
         'steps': '#2CC1AA',    # Turquoise
         'distance': '#E7174A',  # Rouge
         'time': '#FF9A16'      # Orange
     }
+    dates = sorted(daily_stats.keys())
     fig = go.Figure()
-
-    # Barres principales (pas et distance) sur axe primaire
     fig.add_trace(go.Bar(
         x=dates, y=[daily_stats[d]['steps'] for d in dates],
         name='Nombre de pas', marker_color=colors['steps'],
@@ -409,7 +376,6 @@ def make_daily_bar_figure(df):
         name='Distance (m)', marker_color=colors['distance'],
         text=[int(daily_stats[d]['distance']) for d in dates], textposition='auto', yaxis='y'
     ))
-    # Temps de marche sur axe secondaire, en ligne
     fig.add_trace(go.Scatter(
         x=dates, y=[daily_stats[d]['time'] for d in dates],
         name='Temps de marche (min)', mode='lines+markers+text',
@@ -419,32 +385,11 @@ def make_daily_bar_figure(df):
         textposition='top center',
         yaxis='y2'
     ))
-
     fig.update_layout(
         barmode='group',
-        xaxis=dict(
-            showgrid=False,
-            showticklabels=True,   # Affiche les labels de l'axe X
-            showline=True,         # Affiche la ligne de l'axe X
-            zeroline=False,
-            title=None
-        ),
-        yaxis=dict(
-            showgrid=False,
-            showticklabels=False,
-            showline=False,
-            zeroline=False,
-            title=None
-        ),
-        yaxis2=dict(
-            showgrid=False,
-            showticklabels=False,
-            showline=False,
-            zeroline=False,
-            title=None,
-            overlaying='y',
-            side='right'
-        ),
+        xaxis=dict(showgrid=False, showticklabels=True, showline=True, zeroline=False, title=None),
+        yaxis=dict(showgrid=False, showticklabels=False, showline=False, zeroline=False, title=None),
+        yaxis2=dict(showgrid=False, showticklabels=False, showline=False, zeroline=False, title=None, overlaying='y', side='right'),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         margin=dict(t=60, b=60, l=40, r=40),
         height=420,
@@ -570,6 +515,7 @@ def main_app_layout():
 
 app.layout = html.Div([
     dcc.Store(id="login-state", storage_type="session"),
+    dcc.Store(id="segments-store"),
     html.Div(id="login-container", children=login_form()),
     html.Div(id="main-app", style={"display": "none"}),
     html.Button("Déconnexion", id="logout-button", n_clicks=0, style={"display": "none"})
@@ -610,17 +556,22 @@ def handle_login_and_display(n_clicks_login, n_clicks_logout, username, password
 
 @app.callback(
     Output("segment-detail", "children"),
-    Input("density-plot", "clickData")
+    Input("density-plot", "clickData"),
+    Input("segments-store", "data")
 )
-def show_segment_detail(clickData):
-    if not clickData or "points" not in clickData:
+def show_segment_detail(clickData, segments_data):
+    if not clickData or "points" not in clickData or not segments_data:
         return html.Div("Cliquez sur un segment pour voir le détail.", style={"marginTop": "2em"})
-    # Récupérer le segment cliqué
     customdata = clickData["points"][0]["customdata"]
     file_name, start_time, end_time = customdata.split("|")
     start_time = float(start_time)
     end_time = float(end_time)
-    # Retrouver le segment
+    import pandas as pd
+    segments = []
+    for seg in segments_data:
+        seg_copy = dict(seg)
+        seg_copy["segment_data"] = pd.DataFrame(seg_copy["segment_data"])
+        segments.append(seg_copy)
     for seg in segments:
         if seg["file_name"] == file_name and abs(seg["start_time"] - start_time) < 1e-4 and abs(seg["end_time"] - end_time) < 1e-4:
             segment_data = seg["segment_data"]
@@ -638,6 +589,7 @@ def show_segment_detail(clickData):
     Output("patient-feedback", "children"),
     Output("patient-select", "options"),
     Output("graphs-section", "children"),
+    Output("segments-store", "data"),
     Input("submit-patient", "n_clicks"),
     Input("patient-select", "value"),
     State("prenom", "value"),
@@ -658,7 +610,14 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
             print(f"Patient sélectionné : {selected_patient}")
             infos, df = load_patient(selected_patient)
             if infos is None or df is None:
-                return {"display": "block"}, {"display": "block"}, "", "", "Erreur lors du chargement du patient", list_patients(), html.Div()
+                return {"display": "block"}, {"display": "block"}, "", "", "Erreur lors du chargement du patient", list_patients(), html.Div(), None
+            segments = compute_segments(df)
+            daily_stats = compute_daily_stats(df)
+            # Convert segments to JSON-serializable
+            json_segments = [
+                {**{k: v for k, v in seg.items() if k != "segment_data"}, "segment_data": seg["segment_data"].to_dict(orient="list")}
+                for seg in segments
+            ]
             summary = make_patient_summary(infos)
             analysis = make_analysis_content(df)
             graphs = html.Div([
@@ -675,7 +634,7 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
                         "boxShadow": "0 1px 6px rgba(44,193,170,0.07)"
                     })
                 ], style={"margin": "2em 0 1em 0", "textAlign": "left"}),
-                dcc.Graph(figure=make_daily_bar_figure(df), style={"height": "500px", "background": "white", "borderRadius": "18px", "maxWidth": "1100px", "margin": "auto"}),
+                dcc.Graph(figure=make_daily_bar_figure(df, daily_stats), style={"height": "500px", "background": "white", "borderRadius": "18px", "maxWidth": "1100px", "margin": "auto"}),
                 html.H4([
                     html.Span("Périodes exactes d'activité de marche", style={
                         "fontWeight": "bold",
@@ -688,7 +647,7 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
                         "boxShadow": "0 1px 6px rgba(44,193,170,0.07)"
                     })
                 ], style={"margin": "2em 0 1em 0", "textAlign": "left"}),
-                dcc.Graph(id="density-plot", figure=make_density_figure(df), style={"maxWidth": "1100px", "margin": "auto"}),
+                dcc.Graph(id="density-plot", figure=make_density_figure(df, segments), style={"maxWidth": "1100px", "margin": "auto"}),
                 html.Div(id="segment-detail")
             ], style={"width": "100%", "margin": "0 auto"})
             return (
@@ -698,30 +657,38 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
                 analysis,             # analysis-section (indicateurs de perf)
                 "",                   # patient-feedback
                 list_patients(),      # patient-select options
-                graphs                # graphs-section (les deux autres graphes)
+                graphs,               # graphs-section (les deux autres graphes)
+                json_segments         # segments-store
             )
         else:
-            return {"display": "block"}, {"display": "block"}, "", "", "", list_patients(), html.Div()
+            return {"display": "block"}, {"display": "block"}, "", "", "", list_patients(), html.Div(), None
     # Si création d'un nouveau patient
     if not (prenom and nom and age and taille and poids and patho and contents):
-        return {"display": "block"}, {"display": "block"}, "", "", "Veuillez remplir tous les champs et uploader un CSV.", list_patients(), html.Div()
+        return {"display": "block"}, {"display": "block"}, "", "", "Veuillez remplir tous les champs et uploader un CSV.", list_patients(), html.Div(), None
     try:
         taille_m = float(taille) / 100
         poids_kg = float(poids)
         imc = poids_kg / (taille_m ** 2)
     except Exception:
-        return {"display": "block"}, {"display": "block"}, "", "", "Erreur dans la saisie de la taille ou du poids.", list_patients(), html.Div()
+        return {"display": "block"}, {"display": "block"}, "", "", "Erreur dans la saisie de la taille ou du poids.", list_patients(), html.Div(), None
     content_type, content_string = contents.split(',')
     decoded = base64.b64decode(content_string)
     try:
         df_local = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-        df_local['DateTime'] = pd.to_datetime(df_local['DateTime'])
+        df_local['DateFromFile'] = df_local['FileName'].apply(extract_date_from_filename)
+        df_local['DateTime'] = df_local.apply(lambda row: row['DateFromFile'] + pd.to_timedelta(row['HourOfDay'], unit='D'), axis=1)
     except Exception as e:
-        return {"display": "block"}, {"display": "block"}, "", "", f"Erreur lors de la lecture du CSV : {e}", list_patients(), html.Div()
+        return {"display": "block"}, {"display": "block"}, "", "", f"Erreur lors de la lecture du CSV : {e}", list_patients(), html.Div(), None
     infos = {
         "prenom": prenom, "nom": nom, "age": age, "taille": taille, "poids": poids, "imc": round(imc, 1), "patho": patho
     }
     save_patient(prenom, nom, infos, df_local)
+    segments = compute_segments(df_local)
+    daily_stats = compute_daily_stats(df_local)
+    json_segments = [
+        {**{k: v for k, v in seg.items() if k != "segment_data"}, "segment_data": seg["segment_data"].to_dict(orient="list")}
+        for seg in segments
+    ]
     summary = make_patient_summary(infos)
     analysis = make_analysis_content(df_local)
     graphs = html.Div([
@@ -738,7 +705,7 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
                 "boxShadow": "0 1px 6px rgba(44,193,170,0.07)"
             })
         ], style={"margin": "2em 0 1em 0", "textAlign": "left"}),
-        dcc.Graph(figure=make_daily_bar_figure(df_local), style={"height": "500px", "background": "white", "borderRadius": "18px", "maxWidth": "1100px", "margin": "auto"}),
+        dcc.Graph(figure=make_daily_bar_figure(df_local, daily_stats), style={"height": "500px", "background": "white", "borderRadius": "18px", "maxWidth": "1100px", "margin": "auto"}),
         html.H4([
             html.Span("Périodes exactes d'activité de marche", style={
                 "fontWeight": "bold",
@@ -751,7 +718,7 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
                 "boxShadow": "0 1px 6px rgba(44,193,170,0.07)"
             })
         ], style={"margin": "2em 0 1em 0", "textAlign": "left"}),
-        dcc.Graph(id="density-plot", figure=make_density_figure(df_local), style={"maxWidth": "1100px", "margin": "auto"}),
+        dcc.Graph(id="density-plot", figure=make_density_figure(df_local, segments), style={"maxWidth": "1100px", "margin": "auto"}),
         html.Div(id="segment-detail")
     ], style={"width": "100%", "margin": "0 auto"})
     return (
@@ -761,7 +728,8 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
         analysis,             # analysis-section (indicateurs de perf)
         "",                   # patient-feedback
         list_patients(),      # patient-select options
-        graphs                # graphs-section (les deux autres graphes)
+        graphs,               # graphs-section (les deux autres graphes)
+        json_segments         # segments-store
     )
 
 def make_patient_summary(infos):
