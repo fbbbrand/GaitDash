@@ -28,10 +28,6 @@ def save_patient(prenom, nom, infos, df):
         json.dump(infos, f)
     # Sauvegarde CSV
     df.to_csv(os.path.join(PATIENTS_DIR, f"{key}.csv"), index=False)
-    # Création du dossier patient si nécessaire
-    patient_dir = os.path.join(PATIENTS_DIR, key)
-    os.makedirs(patient_dir, exist_ok=True)
-    return key
 
 def load_patient(key):
     # Charge infos et CSV
@@ -41,19 +37,16 @@ def load_patient(key):
     df['DateTime'] = pd.to_datetime(df['DateTime'])
     return infos, df
 
-def save_six_min_test(patient_key, df):
-    """Sauvegarde le test de 6 minutes pour un patient"""
-    # Création du dossier si nécessaire
-    patient_dir = os.path.join(PATIENTS_DIR, patient_key)
-    os.makedirs(patient_dir, exist_ok=True)
-    # Sauvegarde du test de 6 minutes
-    df.to_csv(os.path.join(patient_dir, "six_min_test.csv"), index=False)
+def save_six_min_test(key, df):
+    # Sauvegarde le test de 6 minutes pour un patient
+    if not os.path.exists(os.path.join(PATIENTS_DIR, f"{key}_6min.csv")):
+        df.to_csv(os.path.join(PATIENTS_DIR, f"{key}_6min.csv"), index=False)
 
-def load_six_min_test(patient_key):
-    """Charge le test de 6 minutes d'un patient s'il existe"""
-    six_min_test_path = os.path.join(PATIENTS_DIR, patient_key, "six_min_test.csv")
-    if os.path.exists(six_min_test_path):
-        df = pd.read_csv(six_min_test_path)
+def load_six_min_test(key):
+    # Charge les données du test de 6 minutes pour un patient
+    file_path = os.path.join(PATIENTS_DIR, f"{key}_6min.csv")
+    if os.path.exists(file_path):
+        df = pd.read_csv(file_path)
         df['DateTime'] = pd.to_datetime(df['DateTime'])
         return df
     return None
@@ -244,6 +237,7 @@ def make_density_figure(df):
                 font=dict(size=20)
             )],
             height=400,
+            width=1000,  # Largeur fixe
             plot_bgcolor="white",
             paper_bgcolor="white",
             font=dict(family="Roboto, Arial, sans-serif", size=15)
@@ -317,6 +311,7 @@ def make_detail_figure(segment_data):
                 font=dict(size=20)
             )],
             height=600,
+            width=1000,  # Largeur fixe
             plot_bgcolor="white",
             paper_bgcolor="white",
             font=dict(family="Roboto, Arial, sans-serif", size=15)
@@ -413,6 +408,7 @@ def make_detail_figure(segment_data):
             'font': dict(size=18, color="#2CC1AA")
         },
         height=600, 
+        width=1000,  # Largeur fixe
         showlegend=False,
         margin=dict(t=80, b=40), 
         plot_bgcolor="white", 
@@ -484,6 +480,7 @@ def make_daily_bar_figure(df):
                 font=dict(size=20)
             )],
             height=420,
+            width=1000,  # Largeur fixe
             plot_bgcolor="white",
             paper_bgcolor="white",
             font=dict(family="Roboto, Arial, sans-serif", size=15)
@@ -715,7 +712,6 @@ def main_app_layout():
                 })
             ], style={"margin": "2em 0 1em 0", "textAlign": "left"}),
             
-            # Zone d'upload - clairement séparée du graphique
             html.Div([
                 dcc.Upload(
                     id='upload-six-min-test',
@@ -731,17 +727,14 @@ def main_app_layout():
                         'borderStyle': 'dashed',
                         'borderRadius': '5px',
                         'textAlign': 'center',
-                        'margin': '10px 0',
-                        'position': 'relative',  # Position relative pour éviter le chevauchement
-                        'zIndex': '10'  # Z-index plus élevé pour s'assurer qu'il reste au-dessus
+                        'margin': '10px 0'
                     },
                     multiple=False
                 ),
-                html.Div(id='six-min-test-upload-output', style={'marginBottom': '20px'})
-            ], style={"margin": "1em 0", "position": "relative"}),
+                html.Div(id='six-min-test-upload-output')
+            ], style={"margin": "1em 0 2em 0"}),
             
-            # Graphique - maintenant avec une marge claire par rapport à la zone d'upload
-            html.Div(id='six-min-test-graph', style={"marginTop": "40px"})
+            html.Div(id='six-min-test-graph')
         ], id="six-min-test-section", style={"display": "none"}),
         
         # Graphiques de synthèse et activité quotidienne
@@ -815,7 +808,7 @@ def show_segment_detail(clickData):
         # Graphique détaillé avec statistiques intégrées
         fig = make_detail_figure(segment_data)
         
-        return dcc.Graph(figure=fig)
+        return dcc.Graph(figure=fig, style={"background": "white", "borderRadius": "18px", "margin": "auto"})
     except Exception as e:
         return html.Div(f"Erreur lors de l'affichage des détails: {str(e)}", style={"margin": "2em", "textAlign": "center"})
 
@@ -847,13 +840,10 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
     # Si sélection d'un patient existant
     if ctx.triggered and ctx.triggered[0]['prop_id'].startswith("patient-select"):
         if selected_patient:
-            infos, df = load_patient(selected_patient)
-            
-            # Charger automatiquement le test de 6 minutes s'il existe
+            # Charger les données du test de 6 minutes si elles existent
             six_min_test_data = load_six_min_test(selected_patient)
-            six_min_test_graph = html.Div()
-            if six_min_test_data is not None:
-                six_min_test_graph = dcc.Graph(figure=make_six_min_test_figure(six_min_test_data))
+            
+            infos, df = load_patient(selected_patient)
             
             # Recalculer les segments pour ce patient
             segments = []
@@ -914,7 +904,7 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
                         "boxShadow": "0 1px 6px rgba(44,193,170,0.07)"
                     })
                 ], style={"margin": "2em 0 1em 0", "textAlign": "left"}),
-                dcc.Graph(figure=make_daily_bar_figure(df), style={"height": "500px", "background": "white", "borderRadius": "18px", "maxWidth": "1100px", "margin": "auto"}),
+                dcc.Graph(figure=make_daily_bar_figure(df), style={"height": "500px", "background": "white", "borderRadius": "18px", "margin": "auto"}),
                 
                 # Espace entre les graphiques
                 html.Div(style={"height": "3em"}),
@@ -938,14 +928,23 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
                         "margin": "0.5em 0 1.5em 0",
                         "textAlign": "center"
                     }),
-                    dcc.Graph(id="density-plot", figure=make_density_figure(df), style={"maxWidth": "1100px", "margin": "auto"})
+                    dcc.Graph(id="density-plot", figure=make_density_figure(df), style={"background": "white", "borderRadius": "18px", "margin": "auto"})
                 ]),
                 
                 # Espace avant le détail du segment
                 html.Div(style={"height": "2em"}),
                 
-                html.Div(id="segment-detail")
+                html.Div(id="segment-detail", style={"margin": "auto"})
             ], style={"width": "100%", "margin": "0 auto"})
+            
+            # Créer une variable pour le graphique de test de 6 minutes (vide par défaut)
+            six_min_graph = html.Div()
+            
+            # Préparer le graphique du test de 6 minutes s'il existe
+            six_min_upload_output = ""
+            if six_min_test_data is not None:
+                six_min_graph = dcc.Graph(figure=make_six_min_test_figure(six_min_test_data), style={"background": "white", "borderRadius": "18px", "margin": "auto"})
+            
             return (
                 {"display": "none"},  # create-patient-card
                 {"display": "block"}, # select-patient-card
@@ -954,8 +953,8 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
                 "",                   # patient-feedback
                 [{"label": k.replace("_", " "), "value": k} for k in list_patients()],  # patient-select options
                 graphs,               # graphs-section (les deux autres graphes)
-                "",                   # six-min-test-upload-output
-                six_min_test_graph    # six-min-test-graph
+                six_min_upload_output,# six-min-test-upload-output
+                six_min_graph         # six-min-test-graph
             )
         else:
             return {"display": "block"}, {"display": "block"}, "", "", "", [{"label": k.replace("_", " "), "value": k} for k in list_patients()], html.Div(), "", html.Div()
@@ -1042,7 +1041,7 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
                 "boxShadow": "0 1px 6px rgba(44,193,170,0.07)"
             })
         ], style={"margin": "2em 0 1em 0", "textAlign": "left"}),
-        dcc.Graph(figure=make_daily_bar_figure(df_local), style={"height": "500px", "background": "white", "borderRadius": "18px", "maxWidth": "1100px", "margin": "auto"}),
+        dcc.Graph(figure=make_daily_bar_figure(df_local), style={"height": "500px", "background": "white", "borderRadius": "18px", "margin": "auto"}),
         
         # Espace entre les graphiques
         html.Div(style={"height": "3em"}),
@@ -1066,14 +1065,18 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
                 "margin": "0.5em 0 1.5em 0",
                 "textAlign": "center"
             }),
-            dcc.Graph(id="density-plot", figure=make_density_figure(df_local), style={"maxWidth": "1100px", "margin": "auto"})
+            dcc.Graph(id="density-plot", figure=make_density_figure(df_local), style={"background": "white", "borderRadius": "18px", "margin": "auto"})
         ]),
         
         # Espace avant le détail du segment
         html.Div(style={"height": "2em"}),
         
-        html.Div(id="segment-detail")
+        html.Div(id="segment-detail", style={"margin": "auto"})
     ], style={"width": "100%", "margin": "0 auto"})
+    
+    # Créer une variable pour le graphique de test de 6 minutes (vide par défaut)
+    six_min_graph = html.Div()
+    
     return (
         {"display": "none"},  # create-patient-card
         {"display": "block"}, # select-patient-card
@@ -1083,7 +1086,7 @@ def handle_patient(n_clicks, selected_patient, prenom, nom, age, taille, poids, 
         [{"label": k.replace("_", " "), "value": k} for k in list_patients()],  # patient-select options
         graphs,               # graphs-section (les deux autres graphes)
         "",                   # six-min-test-upload-output
-        html.Div()            # six-min-test-graph
+        six_min_graph         # six-min-test-graph
     )
 
 def make_patient_summary(infos):
@@ -1133,6 +1136,7 @@ def make_six_min_test_figure(df):
                 font=dict(size=20)
             )],
             height=600,
+            width=1000,  # Largeur fixe
             plot_bgcolor="white",
             paper_bgcolor="white",
             font=dict(family="Roboto, Arial, sans-serif", size=15)
@@ -1223,6 +1227,7 @@ def make_six_min_test_figure(df):
             'font': dict(size=18, color="#2CC1AA")
         },
         height=600, 
+        width=1000,  # Largeur fixe
         showlegend=False,
         margin=dict(t=80, b=40), 
         plot_bgcolor="white", 
@@ -1282,21 +1287,6 @@ def make_six_min_test_figure(df):
     return fig
 
 @app.callback(
-    Output("six-min-test-section", "style"),
-    Output("upload-six-min-test", "children"),
-    Input("patient-select", "value")
-)
-def toggle_six_min_test_section(selected_patient):
-    upload_content = html.Div([
-        'Glisser-déposer ou ',
-        html.A('sélectionner un fichier CSV', style={"color": "#2CC1AA", "textDecoration": "underline"})
-    ])
-    
-    if selected_patient:
-        return {"display": "block"}, upload_content
-    return {"display": "none"}, upload_content
-
-@app.callback(
     Output('six-min-test-upload-output', 'children'),
     Output('six-min-test-graph', 'children'),
     Output('analysis-section', 'children', allow_duplicate=True),
@@ -1319,15 +1309,15 @@ def update_six_min_test_output(contents, filename, selected_patient):
         six_min_test_data = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
         six_min_test_data['DateTime'] = pd.to_datetime(six_min_test_data['DateTime'])
         
-        # Sauvegarder le test pour le patient sélectionné
+        # Sauvegarder les données du test de 6 minutes pour ce patient
         if selected_patient:
             save_six_min_test(selected_patient, six_min_test_data)
-            message = "Test de 6 minutes sauvegardé avec succès"
-        else:
-            message = "Attention: Patient non sélectionné, le test n'a pas été sauvegardé"
+        
+        # Ne plus afficher les informations du fichier
+        message = ""
         
         # Créer le graphique
-        graph = dcc.Graph(figure=make_six_min_test_figure(six_min_test_data))
+        graph = dcc.Graph(figure=make_six_min_test_figure(six_min_test_data), style={"background": "white", "borderRadius": "18px", "margin": "auto"})
         
         # Mettre à jour les indicateurs avec les données du patient sélectionné
         if selected_patient:
@@ -1342,6 +1332,15 @@ def update_six_min_test_output(contents, filename, selected_patient):
             html.Br(),
             str(e)
         ], style={"color": "red"}), html.Div(), dash.no_update
+
+@app.callback(
+    Output("six-min-test-section", "style"),
+    Input("patient-select", "value")
+)
+def toggle_six_min_test_section(selected_patient):
+    if selected_patient:
+        return {"display": "block"}
+    return {"display": "none"}
 
 if __name__ == "__main__":
     app.run(debug=True)
