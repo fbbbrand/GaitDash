@@ -1,7 +1,7 @@
 import os
 import json
 import dash
-from dash import dcc, html, Input, Output, State, ALL
+from dash import dcc, html, Input, Output, State, ALL, Dash
 import plotly.graph_objs as go
 import pandas as pd
 import numpy as np
@@ -10,6 +10,10 @@ import io
 from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State
 import datetime
+
+app = Dash(__name__)
+server = app.server 
+
 
 PATIENTS_DIR = "patients"
 os.makedirs(PATIENTS_DIR, exist_ok=True)
