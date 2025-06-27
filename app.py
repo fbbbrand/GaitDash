@@ -12,6 +12,13 @@ from dash.dependencies import Input, Output, State
 import datetime
 
 
+# --- Dash app ---
+app = dash.Dash(__name__)
+server = app.server  # <- Obligatoire pour WSGI
+app.title = "Gait Analysis Dash"
+app.config.suppress_callback_exceptions = True
+#app._favicon = "🦵"
+
 PATIENTS_DIR = "patients"
 os.makedirs(PATIENTS_DIR, exist_ok=True)
 
@@ -87,11 +94,7 @@ dates = []
 # Variables globales pour stocker les données du test de 6 minutes
 six_min_test_data = None
 
-# --- Dash app ---
-app = dash.Dash(__name__)
-app.title = "Gait Analysis Dash"
-app.config.suppress_callback_exceptions = True
-#app._favicon = "🦵"
+
 
 
 def indicator_bar(value, vmin, vmax, label, total=None):
