@@ -15,6 +15,8 @@ app = Dash(__name__)
 server = app.server 
 
 
+
+
 PATIENTS_DIR = "patients"
 os.makedirs(PATIENTS_DIR, exist_ok=True)
 
@@ -98,14 +100,55 @@ app.config.suppress_callback_exceptions = True
 
 
 def indicator_bar(value, vmin, vmax, label, total=None):
+    # Ajuster les échelles pour le test de 6 minutes
+    # Pour nombre de pas et distance parcourue, adapter l'échelle si c'est ces métriques
+    if label == "Nombre de pas" and total is not None:
+        # Ajuster l'échelle pour le nombre de pas du 6MWT
+        # Un test de 6 minutes donne généralement entre 500-1000 pas
+        vmin_6mwt = 0
+        vmax_6mwt = 1200  # Valeur maximale ajustée pour le test de 6 minutes
+    elif label == "Distance parcourue (m)" and total is not None:
+        # Ajuster l'échelle pour la distance du 6MWT
+        # Un test de 6 minutes donne généralement 400-700m
+        vmin_6mwt = 0
+        vmax_6mwt = 800  # Valeur maximale ajustée pour le test de 6 minutes
+    else:
+        # Pour les autres métriques, utiliser la même échelle
+        vmin_6mwt = vmin
+        vmax_6mwt = vmax
+
     # Définir les bornes des zones
     zone1 = vmin + (vmax - vmin) / 3
     zone2 = vmin + 2 * (vmax - vmin) / 3
     percent = 100 * (value - vmin) / (vmax - vmin)
     percent = min(max(percent, 0), 100)
-    # Couleurs des zones
-    colors = ["#E7174A", "#FF9A16", "#2CC1AA"]  # Rouge, Orange, Vert
+    
+    # Calcul du pourcentage pour le test de 6 minutes (si disponible)
+    six_min_percent = None
+    if total is not None:
+        six_min_percent = 100 * (total - vmin_6mwt) / (vmax_6mwt - vmin_6mwt)
+        six_min_percent = min(max(six_min_percent, 0), 100)
+    
+    # Couleurs des zones et des barres
+    background_color = "#eeeeee"  # Couleur gris très clair pour le fond de la barre
+    zone_colors = ["#E7174A", "#FF9A16", "#2CC1AA"]  # Rouge, Orange, Vert
     zone_labels = ["Mauvais", "Bon", "Excellent"]
+    six_min_color = "#4da7f8"  # Bleu clair pour les valeurs du 6MWT
+    daily_color = "#555"  # Gris foncé pour les valeurs quotidiennes
+    title_color = "#2CC1AA"  # Turquoise pour les titres
+    
+    # Déterminer la zone actuelle en fonction de la valeur
+    current_zone = 0
+    if value >= zone1:
+        current_zone = 1
+    if value >= zone2:
+        current_zone = 2
+    
+    # Label de la zone actuelle
+    zone_label = "GOOD"  # Par défaut
+    
+    # Formater les valeurs pour l'affichage
+    value_formatted = f"{value:.2f}" if isinstance(value, float) else f"{int(value)}"
     
     # Label pour la valeur du test de 6 minutes (si disponible)
     six_min_label = None
@@ -115,70 +158,158 @@ def indicator_bar(value, vmin, vmax, label, total=None):
         else:
             six_min_label = f"{int(total)}"
     
+    # Créer le texte de la valeur (combiné)
+    if six_min_label:
+        display_text = html.Div([
+            html.Span(value_formatted, style={"color": daily_color, "fontWeight": "bold"}),
+            html.Span(" | ", style={"color": "#666", "margin": "0 0.3em"}),
+            html.Span(six_min_label, style={"color": six_min_color, "fontWeight": "bold"})
+        ], style={"fontSize": "1.8em", "display": "flex", "alignItems": "center"})
+    else:
+        display_text = html.Span(value_formatted, style={"fontWeight": "bold", "fontSize": "2em", "color": daily_color})
+    
     return html.Div([
         html.Div([
-            html.Span(f"{label}", style={"fontWeight": "bold", "fontSize": "1.1em"}),
-            html.Br(),
+            # Titre avec alignement à gauche
             html.Div([
-                html.Span(f"{value:.2f}" if isinstance(value, float) else int(value),
-                          style={"fontWeight": "bold", "fontSize": "2.2em", "color": "#2CC1AA"}),
-                html.Span(f" ({six_min_label})" if six_min_label else "", 
-                          style={"fontSize": "1.1em", "color": "#666", "marginLeft": "0.5em"})
-            ]),
-            html.Br(),
-            # Barre de fond avec 3 zones colorées
+                html.Span(f"{label}", style={"fontWeight": "bold", "fontSize": "1.1em", "color": title_color})
+            ], style={"textAlign": "left", "marginBottom": "0.5em"}),
+            
+            # Valeurs avec alignement à gauche strict
             html.Div([
+                display_text
+            ], style={"textAlign": "left", "marginBottom": "2em"}),  # Augmenté l'espace ici
+            
+            # Barre avec les 3 zones colorées - déplacée vers le bas
+            html.Div([
+                # Fond de la barre (gris clair)
+                html.Div(style={
+                    "width": "100%",
+                    "height": "10px",
+                    "background": background_color,
+                    "position": "relative",
+                    "borderRadius": "5px",
+                    "display": "flex",  # Utiliser flexbox pour les zones
+                }),
+                
+                # Les trois zones colorées
                 html.Div(style={
                     "width": "33.33%",
-                    "height": "8px",
-                    "background": colors[0],
-                    "display": "inline-block",
-                    "borderTopLeftRadius": "4px",
-                    "borderBottomLeftRadius": "4px"
+                    "height": "10px",
+                    "background": zone_colors[0],  # Rouge
+                    "borderTopLeftRadius": "5px",
+                    "borderBottomLeftRadius": "5px",
+                    "position": "absolute",
+                    "top": "0",
+                    "left": "0",
+                    "zIndex": 2
                 }),
                 html.Div(style={
                     "width": "33.33%",
-                    "height": "8px",
-                    "background": colors[1],
-                    "display": "inline-block"
+                    "height": "10px",
+                    "background": zone_colors[1],  # Orange
+                    "position": "absolute",
+                    "top": "0",
+                    "left": "33.33%",
+                    "zIndex": 2
                 }),
                 html.Div(style={
                     "width": "33.34%",
-                    "height": "8px",
-                    "background": colors[2],
-                    "display": "inline-block",
-                    "borderTopRightRadius": "4px",
-                    "borderBottomRightRadius": "4px"
-                }),
-                # Curseur valeur (petite ligne noire)
-                html.Div(style={
+                    "height": "10px",
+                    "background": zone_colors[2],  # Vert
+                    "borderTopRightRadius": "5px",
+                    "borderBottomRightRadius": "5px",
                     "position": "absolute",
-                    "left": f"calc({percent}% - 1px)",
-                    "top": "0px",
-                    "width": "2px",
-                    "height": "14px",
-                    "background": "black",
+                    "top": "0",
+                    "left": "66.66%",
                     "zIndex": 2
                 }),
+                
+                # Curseur quotidien
+                html.Div(style={
+                    "width": "3px",  # Largeur du curseur
+                    "height": "16px",  # Hauteur du curseur
+                    "background": "#333333",  # Noir
+                    "position": "absolute",
+                    "top": "-3px",  # Légèrement plus haut
+                    "left": f"{percent}%",
+                    "transform": "translateX(-50%)",  # Centrer sur la position
+                    "zIndex": 4,
+                    "borderRadius": "1px",
+                }),
+                
+                # Curseur 6MWT (si disponible)
+                html.Div(style={
+                    "width": "3px",  # Largeur du curseur
+                    "height": "16px",  # Hauteur du curseur
+                    "background": six_min_color,  # Bleu
+                    "position": "absolute",
+                    "top": "-3px",  # Légèrement plus haut
+                    "left": f"{six_min_percent}%" if six_min_percent is not None else "0%",
+                    "transform": "translateX(-50%)",  # Centrer sur la position
+                    "zIndex": 3,
+                    "borderRadius": "1px",
+                    "display": "block" if six_min_percent is not None else "none"
+                })
             ], style={
                 "position": "relative",
                 "width": "100%",
-                "marginTop": "0.5em",
-                "height": "14px",
-                "margin": "0.5em 0.5em 1.5em 0.5em"
+                "height": "10px",
+                "marginBottom": "0.5em",
+                "marginTop": "2em"  # Augmenté l'espace au-dessus de la barre
             }),
-            # Labels des zones
+            
+            # Label de zone (GOOD) en dessous, aligné à droite
             html.Div([
-                html.Span(zone_labels[0], style={"color": colors[0], "fontSize": "0.9em", "width": "33.33%", "display": "inline-block", "textAlign": "left"}),
-                html.Span(zone_labels[1], style={"color": colors[1], "fontSize": "0.9em", "width": "33.33%", "display": "inline-block", "textAlign": "center"}),
-                html.Span(zone_labels[2], style={"color": colors[2], "fontSize": "0.9em", "width": "33.34%", "display": "inline-block", "textAlign": "right"}),
-            ], style={"width": "100%", "marginTop": "0.2em"}),
-        ], style={"padding": "1em"})
+                html.Span(zone_label, style={
+                    "color": zone_colors[2],  # Vert
+                    "fontSize": "0.9em",
+                    "fontWeight": "bold"
+                })
+            ], style={
+                "width": "100%",
+                "textAlign": "right",
+                "marginTop": "0.2em"
+            }),
+            
+            # Légende des indicateurs (Quotidien/6MWT) - déplacée vers le bas
+            html.Div([
+                html.Div([
+                    html.Div(style={
+                        "width": "8px", 
+                        "height": "8px", 
+                        "background": "#333333",  # Noir pour quotidien
+                        "display": "inline-block", 
+                        "marginRight": "5px", 
+                        "borderRadius": "50%"  # Cercle au lieu de carré
+                    }),
+                    html.Span("Quotidien", style={"fontSize": "0.8em", "color": daily_color})
+                ], style={"display": "inline-block", "marginRight": "15px"}),
+                html.Div([
+                    html.Div(style={
+                        "width": "8px", 
+                        "height": "8px", 
+                        "background": six_min_color,  # Bleu pour 6MWT
+                        "display": "inline-block", 
+                        "marginRight": "5px", 
+                        "borderRadius": "50%"  # Cercle au lieu de carré
+                    }),
+                    html.Span("6MWT", style={"fontSize": "0.8em", "color": six_min_color})
+                ], style={
+                    "display": "inline-block", 
+                    "marginRight": "5px", 
+                    "visibility": "visible" if six_min_percent is not None else "hidden"
+                })
+            ], style={"width": "100%", "textAlign": "right", "marginTop": "1.5em"})  # Augmenté l'espace
+        ], style={"padding": "1.5em"})
     ], style={
-        "background": "white",
+        "background": "#ffffff",  # Fond blanc
         "borderRadius": "12px",
         "boxShadow": "0 2px 8px rgba(0,0,0,0.07)",
-        "margin": "0.5em"
+        "margin": "0.5em",
+        "height": "220px",
+        "width": "100%",
+        "color": "#333333"  # Texte gris foncé
     })
 
 def make_gauge_bar(value, title, vmin, vmax, steps, total=None):
@@ -597,7 +728,10 @@ def make_analysis_content(df):
             indicator_bar(df['Speed'].mean(), 0, 2, "Vitesse de pas (m/s)", six_min_speed),
             indicator_bar(df['Length'].mean(), 0, 2, "Longueur de pas (m)", six_min_length),
             indicator_bar(df['Height'].mean(), 0, 0.2, "Hauteur de pas (m)", six_min_height),
+            # Ajuster l'échelle pour le nombre de pas (pour l'affichage quotidien)
+            # Cela permet au test de 6 minutes de ne pas toujours être dans la zone "Mauvais"
             indicator_bar(len(df), 0, 15000, "Nombre de pas", six_min_steps),
+            # Ajuster l'échelle pour la distance parcourue (pour l'affichage quotidien)
             indicator_bar(int(len(df) * df['Length'].mean()), 0, 15000, "Distance parcourue (m)", six_min_distance),
         ], style={
             "display": "grid",
