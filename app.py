@@ -11,12 +11,6 @@ from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State
 import datetime
 
-app = Dash(__name__)
-server = app.server 
-
-app.layout = html.Div("Hello, Railway!")
-
-
 
 PATIENTS_DIR = "patients"
 os.makedirs(PATIENTS_DIR, exist_ok=True)
